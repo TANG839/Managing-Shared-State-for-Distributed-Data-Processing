@@ -1,93 +1,94 @@
-# Assignment 5 - Managing Shared State for Distributed Data Processing
+# Managing Shared State for Distributed Query Execution
+The first task of this assignment is to deploy your assignment 4 solution (or the base one we provide) in Azure, and answer the relevant questions from the [assignment sheet](assignment_sheet_5.pdf).
 
+The second and main programming task of the assignment is to implement distributed query execution with shared state. 
 
+We start again with the same partitioned data on external storage and similar elasticity goals.
+However, we now process a query that needs to share state between workers.
 
-## Getting started
+We want to calculate how often each domain appeared (not only a specific domain as in the last assignment), and report the result for the top 25 domains.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+For each input partition, we build multiple (partial) aggregates, one for each domain, which we then need to merge. Merging on the coordinator, as we did in the last assignment, does not scale well for this query. To scale the merge phase, we partition the aggregates and store them in shared state. After the initial aggregation and partitioning, we distribute the work of merging the partial aggregate partitions, and send the merged results to the coordinator.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+As an example, consider the initial `filelist.csv` with three partitions:
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.db.in.tum.de/cloud-based-data-processing-2425/assignment-5-managing-shared-state-for-distributed-data-processing.git
-git branch -M main
-git push -uf origin main
+test.csv.1
+test.csv.2
+test.csv.3
 ```
 
-## Integrate with your tools
+Each worker takes a partition, partitions and aggregates it, and stores the aggregate in shared state files.
+E.g., we partition the aggregates each into three partitions:
 
-- [ ] [Set up project integrations](https://gitlab.db.in.tum.de/cloud-based-data-processing-2425/assignment-5-managing-shared-state-for-distributed-data-processing/-/settings/integrations)
+```
+aggregated.1.test.csv.1
+aggregated.2.test.csv.1
+aggregated.3.test.csv.1
+aggregated.1.test.csv.2
+aggregated.2.test.csv.2
+aggregated.3.test.csv.2
+aggregated.1.test.csv.3
+aggregated.2.test.csv.3
+aggregated.3.test.csv.3
+```
 
-## Collaborate with your team
+Now each of the workers takes one aggregate partition, e.g.:
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+```
+aggregated.1.test.csv.1
+aggregated.1.test.csv.2
+aggregated.1.test.csv.3
+```
 
-## Test and Deploy
+For this aggregate partition, we can now calculate a total result and get the top 25 `top25.1.csv`, which we again store
+in shared state. Afterwards, the coordinator can collect the small results, calculate, and print the overall top 25.
 
-Use the built-in continuous integration in GitLab.
+You can see a detailed diagram of the query execution stages [here](screenshots/diagram.png)
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+## Shared State
 
-***
+To test data stored in shared state locally, you can use files on your file system
+([`std::fstream`](https://en.cppreference.com/w/cpp/io/basic_fstream)).
+To share state in Azure, you can use the [Azure Storage Library](https://github.com/Azure/azure-storage-cpplite).
+Our scaffold includes a small example how to use the Azure blob storage (similar to S3).
 
-# Editing this README
+For Azure storage, you also need
+to [create a storage account](https://learn.microsoft.com/en-us/azure/storage/common/storage-account-create?tabs=azure-cli):
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```
+az storage account create --name "cbdp$RANDOM" --resource-group cbdp-resourcegroup --location westeurope
+```
 
-## Suggestions for a good README
+You will also need to add the `Storage Blob Data Contributor` role assignment to that storage account through the Azure
+web interface.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## Execution
 
-## Name
-Choose a self-explaining name for your project.
+Install dependencies. Slightly more due than last time due to the Azure library.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```
+sudo apt install cmake g++ libcurl4-openssl-dev libssl-dev uuid-dev
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+In order to run the example we give you in the coordinator, add your storage account name and token in lines 33-34. 
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+To create an access token, use: 
+```
+az account get-access-token --resource https://storage.azure.com/ -o tsv --query accessToken
+```
+ 
+## Submission:
+You can submit everything via GitLab.
+First fork this repository, and add all members of your group to a single repository.
+Then, in this group repository, add:
+* Names of all members of your group in groupMembers.txt
+* Code that implements the assignment
+* Test scripts that demonstrate the capabilities of your solution (correctness, elasticity, resilience)
+* A written report giving a brief description of your implementation, and answering the questions that you can find on the assignment sheet.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## Deploy to Azure:
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+In this assignment, please run your experiments on Microsoft Azure.
+We have a [tutorial](AZURE_TUTORIAL.md) with detailed instructions on how to deploy and run your solution in Azure.

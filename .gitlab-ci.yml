@@ -1,0 +1,26 @@
+stages:
+  - build
+  - deploy
+
+make:
+  stage: build
+  script:
+    - mkdir -p cmake-build-debug
+    - cd cmake-build-debug
+    - cmake ..
+    - make
+  artifacts:
+    paths:
+      - cmake-build-debug/coordinator
+      - cmake-build-debug/worker
+    expire_in: 1 hrs
+    
+checkName:
+  stage: build
+  script: 
+    - bash -c '[ -s groupMembers.txt ]'
+
+checkReport:
+  stage: deploy
+  script:
+    - bash -c '[ -f report.pdf ]'
