@@ -1,2 +1,10 @@
 filelist.csv
 *.*.csv
+worker
+coordinator
+libazure-storage-lite.a
+build.sh
+build
+.cache
+.vscode
+cmake
