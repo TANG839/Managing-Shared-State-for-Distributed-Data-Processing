@@ -1,4 +1,5 @@
 #include "AzureBlobClient.h"
+#include <cstddef>
 #include <iostream>
 #include <string>
 
@@ -64,6 +65,46 @@ int getListenerSocket(char* port) {
    return listener;
 }
 
+auto receiveResponse(pollfd fd, auto handleClientFailure) {
+   std::stringstream ss;
+   std::array<char, 1024> buffer;
+
+   while (true) {
+      ssize_t numBytes = recv(fd.fd, buffer.data(), buffer.size() - 1, 0);
+      
+      if (numBytes > 0) {
+         buffer[static_cast<size_t>(numBytes)] = '\0';
+         ss << std::string_view(buffer.begin(), buffer.begin() + numBytes);
+
+      } else {
+            if (numBytes < 0) {
+                perror("recv() failed");
+            }
+
+            handleClientFailure();
+            continue;
+        }
+   }
+
+   std::string line;
+   std::vector<std::pair<std::string, unsigned>> parsedData;
+
+   while (std::getline(ss, line)) {
+      std::istringstream lineStream(line);
+      std::string url;
+      unsigned number;
+
+      if (lineStream >> url >> number) {
+         parsedData.emplace_back(url, number);
+      } else {
+         std::cerr << "Invalid line format: " << line << std::endl;
+      }
+   }
+
+   // Process the parsed data
+   return parsedData;
+}
+
 int main(int argc, char* argv[]) {
    if (argc != 3) {
       std::cerr << "Usage: " << argv[0] << " <URL to csv list> <listen port>" << std::endl;
@@ -98,26 +139,28 @@ int main(int argc, char* argv[]) {
    // Distribute the work
    size_t result = 0;
    auto distributedWork = std::unordered_map<int, std::string>();
+
+   auto assignWork = [&](int fd) {
+      if (filesTodo.empty()) 
+         return;
+
+      distributedWork[fd] = std::move(filesTodo.back());
+      filesTodo.pop_back();
+
+      const auto& file = distributedWork[fd];
+      if (auto status = send(fd, file.c_str(), file.size(), 0); status == -1) {
+         perror("send() failed");
+         filesTodo.push_back(std::move(distributedWork[fd]));
+         distributedWork.erase(fd);
+      }
+   };
+
    while (!filesTodo.empty() || !distributedWork.empty()) {
       poll(pollFds.data(), pollFds.size(), -1);
       for (size_t index = 0, limit = pollFds.size(); index != limit; ++index) {
          const auto& pollFd = pollFds[index];
          // Look for ready connections
          if (!(pollFd.revents & POLLIN)) continue;
-
-         auto assignWork = [&](int fd) {
-            // Assign work (if any)
-            if (filesTodo.empty()) return;
-            distributedWork[fd] = std::move(filesTodo.back());
-            filesTodo.pop_back();
-
-            const auto& file = distributedWork[fd];
-            if (auto status = send(fd, file.c_str(), file.size(), 0); status == -1) {
-               perror("send() failed");
-               filesTodo.push_back(std::move(distributedWork[fd]));
-               distributedWork.erase(fd);
-            }
-         };
 
          if (pollFd.fd == listener) {
             // Incoming connection -> accept
@@ -159,15 +202,6 @@ int main(int argc, char* argv[]) {
          if (numBytes <= 0) {
             if (numBytes < 0)
                perror("recv() failed: ");
-            handleClientFailure();
-            continue;
-         }
-
-         // Parse response
-         auto response = std::string_view(buffer.data(), static_cast<size_t>(numBytes));
-         size_t clientResult = 0;
-         auto [_, ec] = std::from_chars(response.data(), response.data() + response.size(), clientResult);
-         if (ec != std::errc()) {
             handleClientFailure();
             continue;
          }

@@ -1,15 +1,22 @@
 #include "CurlEasyPtr.h"
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <iostream>
 #include <sstream>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
+#include <vector>
 #include <netdb.h>
 #include <sys/socket.h>
 
-size_t processUrl(CurlEasyPtr& curl, std::string_view url) {
-   using namespace std::literals;
-   size_t result = 0;
+using UrlCountResult = std::vector<std::pair<std::string, unsigned>>;
+
+ UrlCountResult processUrl(CurlEasyPtr& curl, std::string_view url) {
+   using namespace std::literals;   
+   std::unordered_map<std::string, unsigned> urlCounts;
+
    // Download the file
    curl.setUrl(std::string(url));
    auto csvData = curl.performToStringStream();
@@ -24,14 +31,22 @@ size_t processUrl(CurlEasyPtr& curl, std::string_view url) {
             // Check if URL is "google.ru"
             auto pos = column.find("://"sv);
             if (pos != std::string::npos) {
-               auto afterProtocol = std::string_view(column).substr(pos + 3);
-               if (afterProtocol.starts_with("google.ru/"))
-                  ++result;
+               urlCounts[column.substr(pos + 3)]++;
             }
             break;
          }
       }
    }
+
+   UrlCountResult result;
+   result.resize(std::min(25ul, urlCounts.size()));
+   
+   std::partial_sort_copy(urlCounts.begin(), urlCounts.end(), result.begin(), result.end(), 
+      [](auto& a, auto& b) { return a.second > b.second; });
+
+   // debug
+   for (auto& e : result) std::cout << e.first << ", " << e.second << std::endl;
+
    return result;
 }
 
@@ -91,7 +106,12 @@ breakConnect:
       auto url = std::string_view(buffer.data(), static_cast<size_t>(numBytes));
       auto result = processUrl(curl, url);
 
-      auto response = std::to_string(result);
+      std::stringstream response_stream;
+      for (const auto& e : result) {
+         response_stream << e.first << " " << e.second << std::endl;
+      }
+
+      std::string response = response_stream.str();
       if (send(connection, response.c_str(), response.size(), 0) == -1) {
          perror("send() failed");
          break;
