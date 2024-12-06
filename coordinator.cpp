@@ -1,6 +1,10 @@
 #include "AzureBlobClient.h"
+#include <cassert>
 #include <cstddef>
+#include <cstdlib>
 #include <iostream>
+#include <numeric>
+#include <stack>
 #include <string>
 
 #include "CurlEasyPtr.h"
@@ -10,10 +14,36 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <netdb.h>
 #include <sys/poll.h>
 #include <unistd.h>
+
+enum Status {
+   NEW = 0,
+   INITIALIZED,
+};
+
+enum Command {
+   INIT = 0,
+   DOWNLOAD,
+   MERGE
+};
+
+static bool sendCommand(int fd, const char* data, size_t size, Command cmd) {
+   // send partition count
+   std::vector<char> buf;
+   buf.reserve(size + 1);
+   std::memcpy(buf.data() + 1, data, size);
+   buf[0] = cmd;
+
+   if (auto status = send(fd, buf.data(), size + 1, 0); status == -1) {
+      perror(("Coordinator, send() command failed " + std::to_string(cmd)).c_str());
+      return true;
+   }
+   return false;
+}
 
 // Return a listening socket
 int getListenerSocket(char* port) {
@@ -41,6 +71,7 @@ int getListenerSocket(char* port) {
       setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int));
 
       if (bind(listener, iter->ai_addr, iter->ai_addrlen) < 0) {
+         perror("failed to bind listener");
          close(listener);
          continue;
       }
@@ -71,10 +102,13 @@ auto receiveResponse(pollfd fd, auto handleClientFailure) {
 
    while (true) {
       ssize_t numBytes = recv(fd.fd, buffer.data(), buffer.size() - 1, 0);
-      
+
       if (numBytes > 0) {
          buffer[static_cast<size_t>(numBytes)] = '\0';
-         ss << std::string_view(buffer.begin(), buffer.begin() + numBytes);
+         std::string_view sv(buffer.begin(), buffer.begin() + numBytes);
+         ss << sv;
+         if (sv.back() == '\n')
+            break;
 
       } else {
             if (numBytes < 0) {
@@ -82,34 +116,32 @@ auto receiveResponse(pollfd fd, auto handleClientFailure) {
             }
 
             handleClientFailure();
-            continue;
+            break;
         }
    }
 
    std::string line;
    std::vector<std::pair<std::string, unsigned>> parsedData;
 
-   while (std::getline(ss, line)) {
-      std::istringstream lineStream(line);
-      std::string url;
-      unsigned number;
-
-      if (lineStream >> url >> number) {
-         parsedData.emplace_back(url, number);
-      } else {
-         std::cerr << "Invalid line format: " << line << std::endl;
-      }
+   std::string url;
+   unsigned number;
+   while (ss >> url >> number) {
+      parsedData.emplace_back(url, number);
    }
 
-   // Process the parsed data
    return parsedData;
 }
+
+std::unordered_map<int, Status> workerStatus; // fd -> status
 
 int main(int argc, char* argv[]) {
    if (argc != 3) {
       std::cerr << "Usage: " << argv[0] << " <URL to csv list> <listen port>" << std::endl;
       return 1;
    }
+
+   const int partitionCount = 3;
+   std::string partitionCountStr = std::to_string(partitionCount);
 
    auto curlSetup = CurlGlobalSetup();
 
@@ -127,6 +159,7 @@ int main(int argc, char* argv[]) {
 
    // Listen
    auto listener = getListenerSocket(argv[2]);
+   unsigned workerID = 0;
 
    // Setup polling for new connections and worker responses
    std::vector<pollfd> pollFds;
@@ -137,7 +170,6 @@ int main(int argc, char* argv[]) {
    });
 
    // Distribute the work
-   size_t result = 0;
    auto distributedWork = std::unordered_map<int, std::string>();
 
    auto assignWork = [&](int fd) {
@@ -148,19 +180,21 @@ int main(int argc, char* argv[]) {
       filesTodo.pop_back();
 
       const auto& file = distributedWork[fd];
-      if (auto status = send(fd, file.c_str(), file.size(), 0); status == -1) {
-         perror("send() failed");
+
+      if(sendCommand(fd, file.c_str(), file.size(), DOWNLOAD)) {
          filesTodo.push_back(std::move(distributedWork[fd]));
          distributedWork.erase(fd);
       }
+
    };
 
+   // Init and distribute download tasks
    while (!filesTodo.empty() || !distributedWork.empty()) {
       poll(pollFds.data(), pollFds.size(), -1);
       for (size_t index = 0, limit = pollFds.size(); index != limit; ++index) {
          const auto& pollFd = pollFds[index];
          // Look for ready connections
-         if (!(pollFd.revents & POLLIN)) continue;
+         if (!(pollFd.revents & POLLIN)) continue; // this is a bit whack but ok
 
          if (pollFd.fd == listener) {
             // Incoming connection -> accept
@@ -177,8 +211,12 @@ int main(int argc, char* argv[]) {
                .revents = {},
             });
 
-            // And directly assign some work
-            assignWork(newConnection);
+            workerStatus[newConnection] = NEW;
+            std::string request = partitionCountStr + " " + std::to_string(workerID++);
+            if (sendCommand(newConnection, request.data(), request.size(), INIT)) {
+               exit(EXIT_FAILURE);
+            }
+
             continue;
          }
 
@@ -196,26 +234,61 @@ int main(int argc, char* argv[]) {
             --limit;
          };
 
-         // Client is ready -> recv result and send more work
-         auto buffer = std::array<char, 32>();
-         auto numBytes = recv(pollFd.fd, buffer.data(), buffer.size(), 0);
-         if (numBytes <= 0) {
-            if (numBytes < 0)
-               perror("recv() failed: ");
-            handleClientFailure();
+         if (workerStatus[pollFd.fd] == NEW) {
+               std::cout << "assign work " << pollFd.fd << std::endl;
+
+            workerStatus[pollFd.fd] = INITIALIZED;
+            assignWork(pollFd.fd);
             continue;
          }
 
-         // Result ok
-         result += clientResult;
-         distributedWork.erase(pollFd.fd);
+         if (workerStatus[pollFd.fd] == INITIALIZED) {
+            auto result = receiveResponse(pollFd, handleClientFailure);
+            distributedWork.erase(pollFd.fd);
 
-         // Assign more work
-         assignWork(pollFd.fd);
+            // Assign more work
+            assignWork(pollFd.fd);
+            continue;
+         }
       }
    }
 
-   std::cout << result << std::endl;
+   std::stack<unsigned> partitionsToMerge;
+   for (unsigned i = 1; i <= partitionCount; i++)
+      partitionsToMerge.push(i);
+
+   std::unordered_map<int, unsigned> mergingPartitions;
+
+   // distribute merging tasks
+   while (!partitionsToMerge.empty() || !mergingPartitions.empty()) {
+      poll(pollFds.data(), pollFds.size(), -1);
+      for (size_t index = 0, limit = pollFds.size(); index != limit; ++index) {
+         const auto& pollFd = pollFds[index];
+         // Look for ready connections
+         if (!(pollFd.revents & POLLIN)) continue; // this is a bit whack but ok
+
+         assert(workerStatus[pollFd.fd] == INITIALIZED && "Workers must be initialized");
+
+         unsigned partitionId = partitionsToMerge.top();
+         partitionsToMerge.pop();
+         mergingPartitions[pollFd.fd] = partitionId;
+
+         std::string partitionIdStr = std::to_string(partitionId);
+          std::cout << partitionId << std::endl;
+
+         if(sendCommand(pollFd.fd, partitionIdStr.data(), partitionIdStr.size(), MERGE)) {
+            // handle failure
+            partitionsToMerge.push(partitionId);
+            mergingPartitions.erase(pollFd.fd);
+            std::swap(pollFds[index], pollFds.back());
+            pollFds.pop_back();
+            --index;
+            --limit;
+         }            
+      }
+   }
+
+   // TODO: read merged files from blob store and compute top 25. entries are sorted -> use std::merge to merge
 
    // Cleanup
    for (auto& pollFd : pollFds)
