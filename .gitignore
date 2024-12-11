@@ -8,3 +8,5 @@ build
 .cache
 .vscode
 cmake
+mock_blob_store
+compile_commands.json

@@ -34,12 +34,19 @@ UrlCountResult processUrl(CurlEasyPtr& curl, std::string_view url, unsigned part
       // Check the URL in the second column
       unsigned columnIndex = 0;
       for (std::string column; std::getline(rowStream, column, '\t'); ++columnIndex) {
+      
          // column 0 is id, 1 is URL
          if (columnIndex == 1) {
             // Check if URL is "google.ru"
             auto pos = column.find("://"sv);
             if (pos != std::string::npos) {
-               urlCounts[column.substr(pos + 3)]++;
+               auto afterProtocol = url.substr(pos + 3);
+               auto endDomain = afterProtocol.find('/');
+               std::string url = std::string(afterProtocol.substr(0, endDomain));
+               urlCounts[url]++;
+
+            } else {
+               urlCounts[column]++;
             }
             break;
          }
@@ -71,8 +78,7 @@ std::vector<std::pair<std::string, unsigned>> mergeBlobsWithId(unsigned id) {
    for (const auto& entry : std::filesystem::directory_iterator("mock_blob_store")) {
       std::string filename = entry.path().filename().string();
 
-      if (filename.size() >= idStr.size() &&
-          filename.compare(filename.size() - idStr.size(), idStr.size(), idStr) == 0) {
+      if (filename.ends_with(idStr)) {
          std::stringstream ss;
          std::ifstream is(entry.path());
 
@@ -82,7 +88,10 @@ std::vector<std::pair<std::string, unsigned>> mergeBlobsWithId(unsigned id) {
 
             std::string url;
             unsigned count;
-            while (ss >> url >> count) {
+            std::string line;
+            while (getline(ss, line)) {
+               std::stringstream ss2(line);
+               ss2 >> url >> count;
                urlCounts[url] += count;
             }
 
@@ -93,7 +102,7 @@ std::vector<std::pair<std::string, unsigned>> mergeBlobsWithId(unsigned id) {
    }
 
    std::vector<std::pair<std::string, unsigned>> result(urlCounts.begin(), urlCounts.end());
-   std::partial_sort(result.begin(), result.begin() + 25, result.end(), 
+   std::partial_sort(result.begin(), result.begin() + (long)std::min(result.size(), 25ul), result.end(), 
       [](auto& a, auto& b) { return a.second > b.second; });
    
    // debug
@@ -114,6 +123,10 @@ int main(int argc, char* argv[]) {
    if (argc != 3) {
       std::cerr << "Usage: " << argv[0] << " <host> <port>" << std::endl;
       return 1;
+   }
+
+   for (const auto& entry : std::filesystem::directory_iterator("./mock_blob_store")) {
+      std::filesystem::remove(entry);
    }
 
    // Set up the connection
@@ -154,16 +167,18 @@ breakConnect:
    auto curl = CurlEasyPtr::easyInit();
 
    auto buffer = std::array<char, 1024>();
-   unsigned urlIndex = 0;
    unsigned partitionCount = 0;
    std::string workerIdStr;
 
    while (true) {
-      auto numBytes = recv(connection, buffer.data(), buffer.size(), 0);
+      
+      auto numBytes = recv(connection, buffer.data(), buffer.size() - 1, 0);
       if (numBytes <= 0) {
          // connection closed / error
          break;
       }
+
+      buffer[static_cast<size_t>(numBytes)] = 0;
 
       Command cmd = (Command) buffer[0];
 
@@ -177,14 +192,12 @@ breakConnect:
             buffer[buffer.size() - 1] = 0; // terminate string
             std::stringstream ss;
             ss << std::string_view(buffer.data() + 1);
-            std::cerr << std::string_view(buffer.data() + 1) << std::endl;
 
             if (!(ss >> partitionCount >> workerIdStr)) {
                std::cerr << "Invalid init request" << std::endl;
                exit(EXIT_FAILURE);
             }
 
-            std::cout << "received partition coutn " << partitionCount << std::endl;
             break;
          }
 
@@ -193,8 +206,11 @@ breakConnect:
                std::cerr << "Invalid partition count" << std::endl;
                exit(EXIT_FAILURE);
             }
-
-            std::string_view url = std::string_view(buffer.data() + 1, static_cast<size_t>(numBytes));
+            
+            auto sep = std::find(buffer.begin() + 1, buffer.end(), ' ');
+            unsigned downloadId = static_cast<unsigned>(std::atoi(buffer.data() + 1));
+   
+            std::string_view url = std::string_view(sep + 1, static_cast<size_t>(numBytes));
             UrlCountResult result = processUrl(curl, url, partitionCount);
 
             if (result.size() != partitionCount) {
@@ -210,7 +226,7 @@ breakConnect:
 
                std::string result_string = response_stream.str();
                if (!result_string.empty())
-                  sendToBlobStore(result_string, "subpartition_" + workerIdStr + "_" + std::to_string(urlIndex++) + "_" + std::to_string(i + 1));
+                  sendToBlobStore(result_string, "subpartition_" + std::to_string(downloadId) + "_" + std::to_string(i + 1));
             }
 
             break;
@@ -223,8 +239,6 @@ breakConnect:
                std::cerr << "Invalid partition id" << std::endl;
                exit(EXIT_FAILURE);
             }
-
-            std::cout << "merge " << partitionId << std::endl;
 
             auto result = mergeBlobsWithId(partitionId);
             std::stringstream response_stream;

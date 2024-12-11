@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <numeric>
 #include <stack>
@@ -9,16 +10,21 @@
 
 #include "CurlEasyPtr.h"
 #include <array>
-#include <charconv>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <curl/curl.h>
 #include <netdb.h>
 #include <sys/poll.h>
 #include <unistd.h>
+
+#if 1
+#define LOG(str) std::cerr << str << std::endl;
+#endif
 
 enum Status {
    NEW = 0,
@@ -111,13 +117,13 @@ auto receiveResponse(pollfd fd, auto handleClientFailure) {
             break;
 
       } else {
-            if (numBytes < 0) {
-                perror("recv() failed");
-            }
+         if (numBytes < 0) {
+            perror("recv() failed");
+         }
 
-            handleClientFailure();
-            break;
-        }
+         handleClientFailure();
+         break;
+      }
    }
 
    std::string line;
@@ -134,14 +140,19 @@ auto receiveResponse(pollfd fd, auto handleClientFailure) {
 
 std::unordered_map<int, Status> workerStatus; // fd -> status
 
+const int PARTITION_COUNT = 5;
+
 int main(int argc, char* argv[]) {
    if (argc != 3) {
       std::cerr << "Usage: " << argv[0] << " <URL to csv list> <listen port>" << std::endl;
       return 1;
    }
 
-   const int partitionCount = 3;
-   std::string partitionCountStr = std::to_string(partitionCount);
+   for (const auto& entry : std::filesystem::directory_iterator("mock_blob_store")) {
+      std::filesystem::remove_all(entry);
+   }
+
+   std::string partitionCountStr = std::to_string(PARTITION_COUNT);
 
    auto curlSetup = CurlGlobalSetup();
 
@@ -152,10 +163,11 @@ int main(int argc, char* argv[]) {
    curl.setUrl(listUrl);
    auto fileList = curl.performToStringStream();
 
-   std::vector<std::string> filesTodo;
+   static unsigned fileId = 0;
+   std::vector<std::pair<std::string, unsigned>> filesTodo;
    filesTodo.reserve(100);
    for (std::string url; std::getline(fileList, url, '\n');)
-      filesTodo.push_back(std::move(url));
+      filesTodo.emplace_back(std::move(url), fileId++);
 
    // Listen
    auto listener = getListenerSocket(argv[2]);
@@ -170,22 +182,23 @@ int main(int argc, char* argv[]) {
    });
 
    // Distribute the work
-   auto distributedWork = std::unordered_map<int, std::string>();
+   auto distributedWork = std::unordered_map<int, std::pair<std::string, unsigned>>();
 
    auto assignWork = [&](int fd) {
-      if (filesTodo.empty()) 
+      LOG("Assign download: " << fd);
+      if (filesTodo.empty())
          return;
-
+      
       distributedWork[fd] = std::move(filesTodo.back());
       filesTodo.pop_back();
 
       const auto& file = distributedWork[fd];
+      std::string msg = std::to_string(file.second) + ' ' + file.first;
 
-      if(sendCommand(fd, file.c_str(), file.size(), DOWNLOAD)) {
+      if (sendCommand(fd, msg.c_str(), msg.size(), DOWNLOAD)) {
          filesTodo.push_back(std::move(distributedWork[fd]));
          distributedWork.erase(fd);
       }
-
    };
 
    // Init and distribute download tasks
@@ -211,8 +224,11 @@ int main(int argc, char* argv[]) {
                .revents = {},
             });
 
+            LOG("Init " << workerID << " fd: " << newConnection);
+
             workerStatus[newConnection] = NEW;
             std::string request = partitionCountStr + " " + std::to_string(workerID++);
+
             if (sendCommand(newConnection, request.data(), request.size(), INIT)) {
                exit(EXIT_FAILURE);
             }
@@ -221,6 +237,8 @@ int main(int argc, char* argv[]) {
          }
 
          auto handleClientFailure = [&] {
+            LOG("Failed during download: " << pollFd.fd);
+
             // Worker failed. Make sure the work gets done by someone else.
             if (distributedWork.contains(pollFd.fd)) {
                filesTodo.push_back(std::move(distributedWork[pollFd.fd]));
@@ -235,8 +253,6 @@ int main(int argc, char* argv[]) {
          };
 
          if (workerStatus[pollFd.fd] == NEW) {
-               std::cout << "assign work " << pollFd.fd << std::endl;
-
             workerStatus[pollFd.fd] = INITIALIZED;
             assignWork(pollFd.fd);
             continue;
@@ -254,7 +270,7 @@ int main(int argc, char* argv[]) {
    }
 
    std::stack<unsigned> partitionsToMerge;
-   for (unsigned i = 1; i <= partitionCount; i++)
+   for (unsigned i = 1; i <= PARTITION_COUNT; i++)
       partitionsToMerge.push(i);
 
    std::unordered_map<int, unsigned> mergingPartitions;
@@ -265,30 +281,81 @@ int main(int argc, char* argv[]) {
       for (size_t index = 0, limit = pollFds.size(); index != limit; ++index) {
          const auto& pollFd = pollFds[index];
          // Look for ready connections
-         if (!(pollFd.revents & POLLIN)) continue; // this is a bit whack but ok
+         if (!(pollFd.revents & POLLIN) || pollFd.fd == listener) continue;
+
+         char buffer[1024]; // Temporary buffer for discarding data
+         ssize_t bytes_read;
+
+         while ((bytes_read = recv(pollFd.fd, buffer, sizeof(buffer), MSG_DONTWAIT)) > 0) {}
+
+         LOG("Assign merge: " << pollFd.fd);
 
          assert(workerStatus[pollFd.fd] == INITIALIZED && "Workers must be initialized");
+
+         if (partitionsToMerge.empty()) {
+            mergingPartitions.erase(pollFd.fd);
+            continue;
+         }
 
          unsigned partitionId = partitionsToMerge.top();
          partitionsToMerge.pop();
          mergingPartitions[pollFd.fd] = partitionId;
 
          std::string partitionIdStr = std::to_string(partitionId);
-          std::cout << partitionId << std::endl;
 
-         if(sendCommand(pollFd.fd, partitionIdStr.data(), partitionIdStr.size(), MERGE)) {
+         if (sendCommand(pollFd.fd, partitionIdStr.data(), partitionIdStr.size(), MERGE)) {
             // handle failure
+            LOG("Failed during merge: " << pollFd.fd);
             partitionsToMerge.push(partitionId);
             mergingPartitions.erase(pollFd.fd);
             std::swap(pollFds[index], pollFds.back());
             pollFds.pop_back();
             --index;
             --limit;
-         }            
+         }
       }
    }
 
    // TODO: read merged files from blob store and compute top 25. entries are sorted -> use std::merge to merge
+
+   std::vector<std::pair<std::string, unsigned>> urlCounts;
+
+   for (const auto& entry : std::filesystem::directory_iterator("mock_blob_store")) {
+      auto path = entry.path();
+      if (path.filename().string().starts_with("sorted_partition_")) {
+         std::ifstream file(path);
+         std::stringstream ss;
+         ss << file.rdbuf();
+
+         std::string url;
+         unsigned count;
+
+         std::vector<std::pair<std::string, unsigned>> partitionUrls;
+
+         int i = 0;
+         while (i++ < 25 && ss >> url >> count) {
+            partitionUrls.emplace_back(url, count);
+         }
+
+         std::vector<std::pair<std::string, unsigned>> tempResult;
+         std::merge(urlCounts.begin(), urlCounts.end(),
+                    partitionUrls.begin(), partitionUrls.end(),
+                    std::back_inserter(tempResult),      
+                    [](const auto& a, const auto& b) { return a.second > b.second; });
+
+         if (tempResult.size() > 25) {
+            tempResult.resize(25);
+         }
+
+         urlCounts = std::move(tempResult);
+      }
+   }
+
+   std::ofstream os("result.csv");
+
+   for (auto& e : urlCounts)
+      os << e.first << " " << e.second << std::endl;
+   os.close();
 
    // Cleanup
    for (auto& pollFd : pollFds)
@@ -333,5 +400,3 @@ int main(int argc, char* argv[]) {
 //    }
 //    return url;
 // }
-
-
