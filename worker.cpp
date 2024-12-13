@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -78,11 +79,13 @@ void sendToBlobStore(std::string_view msg, std::string filename) {
 std::vector<std::pair<std::string, unsigned>> mergeBlobsWithId(unsigned id) {
    std::string idStr = std::to_string(id);
    std::unordered_map<std::string, unsigned> urlCounts;
+   std::regex pattern("subpartition_[0-9]+_" + std::to_string(id));
 
    for (const auto& entry : std::filesystem::directory_iterator("mock_blob_store")) {
       std::string filename = entry.path().filename().string();
 
-      if (filename.starts_with("subpartition") && filename.ends_with(idStr)) {
+      if (std::regex_match(filename, pattern)) {
+
          std::stringstream ss;
          std::ifstream is(entry.path());
 
@@ -174,9 +177,6 @@ breakConnect:
    auto buffer = std::array<char, 1024>();
    unsigned partitionCount = 0;
    std::string workerIdStr;
-      std::cerr << "TEST " << std::endl;
-      std::cerr << "TEST " << std::endl;
-      std::cerr << "TEST " << std::endl;
 
    while (true) {
       auto numBytes = recv(connection, buffer.data(), buffer.size() - 1, 0);
@@ -187,7 +187,6 @@ breakConnect:
       }
 
       buffer[static_cast<size_t>(numBytes)] = 0;
-      std::cerr <<  buffer.data() + 1 << std::endl;
 
       Command cmd = (Command) buffer[0];
 
@@ -258,7 +257,6 @@ breakConnect:
             std::string result_string = response_stream.str();
             if (!result_string.empty())
                sendToBlobStore(result_string, "sorted_partition_" + std::to_string(partitionId));
-            LOG("Worke: " << std::to_string(partitionId));
             break;
          }
          default: {

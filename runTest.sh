@@ -12,10 +12,11 @@ test -f "$1" || (echo "\"$1\": No such file or directory" && exit 1)
 # Spawn the coordinator process
 
 build/coordinator "file://$(dirname "$(realpath "$1")")/filelist.csv" 4243  &
+#gdb -ex r --args build/coordinator "file://$(dirname "$(realpath "$1")")/filelist.csv" 4243 
 # Spawn some workers
-for _ in {1..1}; do
-  gdb -ex r --args build/worker "localhost" "4243"
-  # build/worker "localhost" "4243" &
+for _ in {1..10}; do
+  # gdb -ex r --args build/worker "localhost" "4243"
+  build/worker "localhost" "4243" &
 done
 
 #gdb -ex r --args build/coordinator "file://$(dirname "$(realpath "$1")")/filelist.csv" 4243 

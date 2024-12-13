@@ -102,45 +102,35 @@ int getListenerSocket(char* port) {
    return listener;
 }
 
-auto receiveResponse(pollfd fd, auto handleClientFailure) {
+bool receiveResponse(pollfd fd, auto handleClientFailure) {
    std::stringstream ss;
    std::array<char, 1024> buffer;
 
-   while (true) {
-      ssize_t numBytes = recv(fd.fd, buffer.data(), buffer.size() - 1, 0);
+   ssize_t numBytes = recv(fd.fd, buffer.data(), buffer.size() - 1, 0);
 
-      if (numBytes > 0) {
-         buffer[static_cast<size_t>(numBytes)] = '\0';
-         std::string_view sv(buffer.begin(), buffer.begin() + numBytes);
-         ss << sv;
-         if (sv.back() == '\n')
-            break;
-
-      } else {
-         if (numBytes < 0) {
-            perror("recv() failed");
-         }
-
+   if (numBytes > 0) {
+      buffer[static_cast<size_t>(numBytes)] = '\0';
+      std::string_view sv(buffer.begin(), buffer.begin() + numBytes);
+      if (sv != "Success\n") {
          handleClientFailure();
-         break;
+         return true;
       }
+
+   } else {
+      if (numBytes < 0) {
+         perror("recv() failed");
+      }
+
+      handleClientFailure();
+      return true;
    }
 
-   std::string line;
-   std::vector<std::pair<std::string, unsigned>> parsedData;
-
-   std::string url;
-   unsigned number;
-   while (ss >> url >> number) {
-      parsedData.emplace_back(url, number);
-   }
-
-   return parsedData;
+   return false;  
 }
 
 std::unordered_map<int, Status> workerStatus; // fd -> status
 
-const int PARTITION_COUNT = 5;
+const int PARTITION_COUNT = 16;
 
 int main(int argc, char* argv[]) {
    if (argc != 3) {
@@ -185,7 +175,6 @@ int main(int argc, char* argv[]) {
    auto distributedWork = std::unordered_map<int, std::pair<std::string, unsigned>>();
 
    auto assignWork = [&](int fd) {
-      LOG("Assign download: " << fd);
       if (filesTodo.empty())
          return;
       
@@ -236,30 +225,45 @@ int main(int argc, char* argv[]) {
             continue;
          }
 
-         auto handleClientFailure = [&] {
-            LOG("Failed during download: " << pollFd.fd);
-
-            // Worker failed. Make sure the work gets done by someone else.
-            if (distributedWork.contains(pollFd.fd)) {
-               filesTodo.push_back(std::move(distributedWork[pollFd.fd]));
-               distributedWork.erase(pollFd.fd);
-            }
-            // Drop the connection
-            close(pollFd.fd); // Bye!
-            std::swap(pollFds[index], pollFds.back());
-            pollFds.pop_back();
-            --index;
-            --limit;
-         };
-
          if (workerStatus[pollFd.fd] == NEW) {
-            workerStatus[pollFd.fd] = INITIALIZED;
-            assignWork(pollFd.fd);
+            bool failed = receiveResponse(pollFd, [&] {
+               LOG("Failed during init: " << pollFd.fd);
+
+               // Drop the connection
+               close(pollFd.fd); // Bye!
+               std::swap(pollFds[index], pollFds.back());
+               pollFds.pop_back();
+               --index;
+               --limit;
+            });
+
+
+            if (!failed) {
+               workerStatus[pollFd.fd] = INITIALIZED;
+               assignWork(pollFd.fd);
+            }
+
+
             continue;
          }
 
          if (workerStatus[pollFd.fd] == INITIALIZED) {
-            auto result = receiveResponse(pollFd, handleClientFailure);
+            receiveResponse(pollFd, [&] {
+               LOG("Failed during download: " << pollFd.fd);
+
+               // Worker failed. Make sure the work gets done by someone else.
+               if (distributedWork.contains(pollFd.fd)) {
+                  filesTodo.push_back(std::move(distributedWork[pollFd.fd]));
+                  distributedWork.erase(pollFd.fd);
+               }
+               // Drop the connection
+               close(pollFd.fd); // Bye!
+               std::swap(pollFds[index], pollFds.back());
+               pollFds.pop_back();
+               --index;
+               --limit;
+            });
+
             distributedWork.erase(pollFd.fd);
 
             // Assign more work
@@ -274,46 +278,70 @@ int main(int argc, char* argv[]) {
       partitionsToMerge.push(i);
 
    std::unordered_map<int, unsigned> mergingPartitions;
-   usleep(15000000); // FIXME: for some reason merging starts before all downloads are completed...
 
    // distribute merging tasks
+   auto sendMerge = [&](size_t& index, size_t& limit, int fd) {
+      assert(workerStatus[fd] == INITIALIZED && "Workers must be initialized");
+
+      if (partitionsToMerge.empty()) {
+         mergingPartitions.erase(fd);
+         return;
+      }
+
+      unsigned partitionId = partitionsToMerge.top();
+      partitionsToMerge.pop();
+      mergingPartitions[fd] = partitionId;
+
+      std::string partitionIdStr = std::to_string(partitionId);
+      LOG("Assign merge to fd " << fd << " partition: " << partitionId);
+
+      if (sendCommand(fd, partitionIdStr.data(), partitionIdStr.size(), MERGE)) {
+         // handle failure
+         LOG("Failed during merge: " << fd);
+         partitionsToMerge.push(partitionId);
+         mergingPartitions.erase(fd);
+         std::swap(pollFds[index], pollFds.back());
+         pollFds.pop_back();
+         --index;
+         --limit;
+      }
+   };
+
+   size_t limit = std::min(partitionsToMerge.size(), pollFds.size());
+   for (size_t index = 0; index < limit; ++index) {
+      const auto& pollFd = pollFds[index];
+      // Look for ready connections
+      if (pollFd.fd == listener) continue;
+
+      sendMerge(index, limit, pollFd.fd);
+   }
+      
    while (!partitionsToMerge.empty() || !mergingPartitions.empty()) {
       poll(pollFds.data(), pollFds.size(), -1);
+
       for (size_t index = 0, limit = pollFds.size(); index != limit; ++index) {
          const auto& pollFd = pollFds[index];
          // Look for ready connections
          if (!(pollFd.revents & POLLIN) || pollFd.fd == listener) continue;
 
-         char buffer[1024]; // Temporary buffer for discarding data
-         ssize_t bytes_read;
-
-         while ((bytes_read = recv(pollFd.fd, buffer, sizeof(buffer), MSG_DONTWAIT)) > 0) {}
-
-         LOG("Assign merge: " << pollFd.fd);
-
-         assert(workerStatus[pollFd.fd] == INITIALIZED && "Workers must be initialized");
-
-         if (partitionsToMerge.empty()) {
-            mergingPartitions.erase(pollFd.fd);
-            continue;
-         }
-
-         unsigned partitionId = partitionsToMerge.top();
-         partitionsToMerge.pop();
-         mergingPartitions[pollFd.fd] = partitionId;
-
-         std::string partitionIdStr = std::to_string(partitionId);
-
-         if (sendCommand(pollFd.fd, partitionIdStr.data(), partitionIdStr.size(), MERGE)) {
-            // handle failure
+         receiveResponse(pollFd, [&] {
             LOG("Failed during merge: " << pollFd.fd);
-            partitionsToMerge.push(partitionId);
-            mergingPartitions.erase(pollFd.fd);
+
+            // Worker failed. Make sure the work gets done by someone else.
+            if (mergingPartitions.contains(pollFd.fd)) {
+               partitionsToMerge.push(std::move(mergingPartitions[pollFd.fd]));
+               mergingPartitions.erase(pollFd.fd);
+            }
+
+            // Drop the connection
+            close(pollFd.fd); // Bye!
             std::swap(pollFds[index], pollFds.back());
             pollFds.pop_back();
             --index;
             --limit;
-         }
+         });
+
+       sendMerge(index, limit, pollFd.fd);
       }
    }
 
