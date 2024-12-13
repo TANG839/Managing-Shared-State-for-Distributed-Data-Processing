@@ -19,6 +19,10 @@
 #include <pthread.h>
 #include <sys/socket.h>
 
+#if 1
+#define LOG(str) std::cerr << str << std::endl;
+#endif
+
 using UrlCountResult = std::vector<std::vector<std::pair<std::string, unsigned>>>;
 
 UrlCountResult processUrl(CurlEasyPtr& curl, std::string_view url, unsigned partitionCount) {
@@ -40,7 +44,7 @@ UrlCountResult processUrl(CurlEasyPtr& curl, std::string_view url, unsigned part
             // Check if URL is "google.ru"
             auto pos = column.find("://"sv);
             if (pos != std::string::npos) {
-               auto afterProtocol = url.substr(pos + 3);
+               auto afterProtocol = column.substr(pos + 3);
                auto endDomain = afterProtocol.find('/');
                std::string url = std::string(afterProtocol.substr(0, endDomain));
                urlCounts[url]++;
@@ -78,7 +82,7 @@ std::vector<std::pair<std::string, unsigned>> mergeBlobsWithId(unsigned id) {
    for (const auto& entry : std::filesystem::directory_iterator("mock_blob_store")) {
       std::string filename = entry.path().filename().string();
 
-      if (filename.ends_with(idStr)) {
+      if (filename.starts_with("subpartition") && filename.ends_with(idStr)) {
          std::stringstream ss;
          std::ifstream is(entry.path());
 
@@ -90,8 +94,9 @@ std::vector<std::pair<std::string, unsigned>> mergeBlobsWithId(unsigned id) {
             unsigned count;
             std::string line;
             while (getline(ss, line)) {
-               std::stringstream ss2(line);
-               ss2 >> url >> count;
+               size_t tab = line.find('\t');
+               url = line.substr(0, tab);
+               count = static_cast<unsigned>(std::atoi(line.substr(tab + 1, line.size()).c_str()));
                urlCounts[url] += count;
             }
 
@@ -169,16 +174,20 @@ breakConnect:
    auto buffer = std::array<char, 1024>();
    unsigned partitionCount = 0;
    std::string workerIdStr;
+      std::cerr << "TEST " << std::endl;
+      std::cerr << "TEST " << std::endl;
+      std::cerr << "TEST " << std::endl;
 
    while (true) {
-      
       auto numBytes = recv(connection, buffer.data(), buffer.size() - 1, 0);
+
       if (numBytes <= 0) {
          // connection closed / error
          break;
       }
 
       buffer[static_cast<size_t>(numBytes)] = 0;
+      std::cerr <<  buffer.data() + 1 << std::endl;
 
       Command cmd = (Command) buffer[0];
 
@@ -221,7 +230,7 @@ breakConnect:
             for (unsigned i = 0; i < partitionCount; i++) {
                std::stringstream response_stream;
                for (const auto& e : result[i]) {
-                  response_stream << e.first << " " << e.second << "\n";
+                  response_stream << e.first << '\t' << e.second << "\n";
                }
 
                std::string result_string = response_stream.str();
@@ -249,7 +258,7 @@ breakConnect:
             std::string result_string = response_stream.str();
             if (!result_string.empty())
                sendToBlobStore(result_string, "sorted_partition_" + std::to_string(partitionId));
-
+            LOG("Worke: " << std::to_string(partitionId));
             break;
          }
          default: {
@@ -263,7 +272,8 @@ breakConnect:
          perror("send() failed");
       }
    }
-
+   
+   LOG("Terminate worker");
    close(connection);
    return 0;
 }

@@ -227,7 +227,7 @@ int main(int argc, char* argv[]) {
             LOG("Init " << workerID << " fd: " << newConnection);
 
             workerStatus[newConnection] = NEW;
-            std::string request = partitionCountStr + " " + std::to_string(workerID++);
+            std::string request = partitionCountStr + ' ' + std::to_string(workerID++);
 
             if (sendCommand(newConnection, request.data(), request.size(), INIT)) {
                exit(EXIT_FAILURE);
@@ -274,6 +274,7 @@ int main(int argc, char* argv[]) {
       partitionsToMerge.push(i);
 
    std::unordered_map<int, unsigned> mergingPartitions;
+   usleep(15000000); // FIXME: for some reason merging starts before all downloads are completed...
 
    // distribute merging tasks
    while (!partitionsToMerge.empty() || !mergingPartitions.empty()) {
