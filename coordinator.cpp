@@ -138,20 +138,26 @@ int main(int argc, char* argv[]) {
       return 1;
    }
 
-   for (const auto& entry : std::filesystem::directory_iterator("mock_blob_store")) {
-      std::filesystem::remove_all(entry);
-   }
-
    std::string partitionCountStr = std::to_string(PARTITION_COUNT);
 
    auto curlSetup = CurlGlobalSetup();
 
    auto listUrl = std::string(argv[1]);
 
-   // Download the file list
-   auto curl = CurlEasyPtr::easyInit();
-   curl.setUrl(listUrl);
-   auto fileList = curl.performToStringStream();
+   // // Download the file list
+   // auto curl = CurlEasyPtr::easyInit();
+   // curl.setUrl(listUrl);
+   // auto fileList = curl.performToStringStream();
+   static const std::string accountName = "csb10032003e7e1ee2c";
+   static const std::string accountToken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Inp4ZWcyV09OcFRrd041R21lWWN1VGR0QzZKMCIsImtpZCI6Inp4ZWcyV09OcFRrd041R21lWWN1VGR0QzZKMCJ9.eyJhdWQiOiJodHRwczovL3N0b3JhZ2UuYXp1cmUuY29tLyIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzFjNmJhMjc0LTNjMzktNGE2MC1hMzZiLTM2N2IxNDc3MGM5My8iLCJpYXQiOjE3MzQxODUwOTEsIm5iZiI6MTczNDE4NTA5MSwiZXhwIjoxNzM0MTkwMTMzLCJhY3IiOiIxIiwiYWlvIjoiQVlRQWUvOFlBQUFBMjc3NDI3bmIydTdrMzhYOGFxNjNXNENhR0RoR2oyRnp4K1VvNUVGN1JJNWhudWIrQTRuUWMyTFBVWGJ3VW5xMmlsdjdRdUwvMmhVZU1UNmJrY2h4RU9tRlRJS3R2NEYwMFJ2UmU4SEpzUjdRVENhclVoK01EbEJEbXFwUzl1REp6Y0pDR21oc1FQRzhGcFo1NUlTSUhGS1ozRlpCaHlCZXJyOGZIaWlFUHRFPSIsImFsdHNlY2lkIjoiMTpsaXZlLmNvbTowMDAzNDAwMjgwNzE1OEI2IiwiYW1yIjpbInB3ZCIsIm1mYSJdLCJhcHBpZCI6IjA0YjA3Nzk1LThkZGItNDYxYS1iYmVlLTAyZjllMWJmN2I0NiIsImFwcGlkYWNyIjoiMCIsImVtYWlsIjoibW9hYWQubWFhcm91ZmlAaWNsb3VkLmNvbSIsImZhbWlseV9uYW1lIjoiTWFyb3VmaSIsImdpdmVuX25hbWUiOiJNb2FkIiwiZ3JvdXBzIjpbIjY0MGYzNGQ3LThlNzctNDg2My04OWE2LTI1ZjY4YjEyNTMxOCJdLCJpZHAiOiJsaXZlLmNvbSIsImlkdHlwIjoidXNlciIsImlwYWRkciI6IjE0MS44NC42OS44OSIsIm5hbWUiOiJNb2FkIE1hcm91ZmkiLCJvaWQiOiI2YjA4YmFhNC1iZWM3LTQ4YTgtOThkNC0yMmEyMjZjZGFhM2UiLCJwdWlkIjoiMTAwMzIwMDNFN0UxRUUyQyIsInJoIjoiMS5BUk1CZEtKckhEazhZRXFqYXpaN0ZIY01rNEdtQnVUVTg2aENrTGJDc0NsSmV2RVVBVElUQVEuIiwic2NwIjoidXNlcl9pbXBlcnNvbmF0aW9uIiwic3ViIjoiSnN5cFVqN1JMMXZyZnJ3bGEtc2JVQTRsRjlvRUl5MFBnRVBuYVFGalp3SSIsInRpZCI6IjFjNmJhMjc0LTNjMzktNGE2MC1hMzZiLTM2N2IxNDc3MGM5MyIsInVuaXF1ZV9uYW1lIjoibGl2ZS5jb20jbW9hYWQubWFhcm91ZmlAaWNsb3VkLmNvbSIsInV0aSI6IlFlLXdRUWNaUmttV2pYdGk5Z2lsQUEiLCJ2ZXIiOiIxLjAiLCJ4bXNfaWRyZWwiOiIxIDI2IiwieG1zX3RkYnIiOiJFVSJ9.hBTF5u8gqvhji6FcEF9FC4F7aOyW717Ttbtno7hxN3qONLUMF5mNDpm9G-2hjX8gN4CjBwHfP8AxLQjXSRPiYaHBGXU1xqpL4j4SAfNpZ57zB8jZkj4JiWM7G6pmyOAZ5N-kseI305duYtYTRIbMULFy7IyGVYShNkHzaNLDGDXboF4OnIhRPWgMEhlK4JPv7RXZl2u4bNT_OA5e2HBlzOG1lnRDRQv-Tgoj0IaNeOorE1bcorGbNWRY5Gwm7jLu_Cg-eTOlh02uF4Km4G8zTG0EiKaBSLo5BLifAPX43v0g5iiKib1wD6yqlUDDmEuUFIfE3kHnIzAOD5yEkietTQ";
+   static const std::string container_name ="cbdp-files";
+   static const std::string container_name_intermediate ="cbdp-files-intermediate";
+
+   std::cerr << "Trying to authenticate" << std::endl;
+   auto blobClient = AzureBlobClient(accountName, accountToken,container_name);
+
+   std::cerr << "Downloading filelist.csv_ yo my guy_third change" << std::endl;
+   auto fileList = blobClient.downloadStringStream("filelist.txt",container_name);
 
    static unsigned fileId = 0;
    std::vector<std::pair<std::string, unsigned>> filesTodo;
@@ -192,7 +198,7 @@ int main(int argc, char* argv[]) {
 
    // Init and distribute download tasks
    while (!filesTodo.empty() || !distributedWork.empty()) {
-      poll(pollFds.data(), pollFds.size(), -1);
+      poll(pollFds.data(), static_cast<nfds_t>(pollFds.size()), -1);
       for (size_t index = 0, limit = pollFds.size(); index != limit; ++index) {
          const auto& pollFd = pollFds[index];
          // Look for ready connections
@@ -213,7 +219,7 @@ int main(int argc, char* argv[]) {
                .revents = {},
             });
 
-            LOG("Init " << workerID << " fd: " << newConnection);
+            // LOG("Init " << workerID << " fd: " << newConnection);
 
             workerStatus[newConnection] = NEW;
             std::string request = partitionCountStr + ' ' + std::to_string(workerID++);
@@ -293,7 +299,7 @@ int main(int argc, char* argv[]) {
       mergingPartitions[fd] = partitionId;
 
       std::string partitionIdStr = std::to_string(partitionId);
-      LOG("Assign merge to fd " << fd << " partition: " << partitionId);
+      // LOG("Assign merge to fd " << fd << " partition: " << partitionId);
 
       if (sendCommand(fd, partitionIdStr.data(), partitionIdStr.size(), MERGE)) {
          // handle failure
@@ -317,7 +323,7 @@ int main(int argc, char* argv[]) {
    }
       
    while (!partitionsToMerge.empty() || !mergingPartitions.empty()) {
-      poll(pollFds.data(), pollFds.size(), -1);
+      poll(pollFds.data(), static_cast<nfds_t>(pollFds.size()), -1);
 
       for (size_t index = 0, limit = pollFds.size(); index != limit; ++index) {
          const auto& pollFd = pollFds[index];
@@ -345,87 +351,70 @@ int main(int argc, char* argv[]) {
       }
    }
 
-   // TODO: read merged files from blob store and compute top 25. entries are sorted -> use std::merge to merge
+// TODO: read merged files from blob store and compute top 25. entries are sorted -> use std::merge to merge
 
-   std::vector<std::pair<std::string, unsigned>> urlCounts;
+// return 0;
+std::cerr << "\n=== Starting Final URL Processing ===" << std::endl;
+std::unordered_map<std::string, unsigned> combinedCounts;
+auto blobList = blobClient.listBlobs(container_name_intermediate);
+std::cerr << "Found " << blobList.size() << " blobs in container '" << container_name_intermediate << "'" << std::endl;
 
-   for (const auto& entry : std::filesystem::directory_iterator("mock_blob_store")) {
-      auto path = entry.path();
-      if (path.filename().string().starts_with("sorted_partition_")) {
-         std::ifstream file(path);
-         std::stringstream ss;
-         ss << file.rdbuf();
-
-         std::string url;
-         unsigned count;
-
-         std::vector<std::pair<std::string, unsigned>> partitionUrls;
-
-         int i = 0;
-         while (i++ < 25 && ss >> url >> count) {
-            partitionUrls.emplace_back(url, count);
+// First pass: combine all counts for identical URLs
+for (const auto& blobName : blobList) {
+    if (blobName.starts_with("sorted_partition_")) {
+        std::cerr << "Processing blob: " << blobName << std::endl;
+        auto blobContent = blobClient.downloadStringStream(blobName, container_name_intermediate);
+      //   std::string url;
+      //   unsigned count;
+        
+      std::string line;
+      while (std::getline(blobContent, line)) {
+         size_t lastSpace = line.rfind(' ');
+         if (lastSpace != std::string::npos) {
+            std::string url = line.substr(0, lastSpace);
+            // Cast explicitly to handle the precision warning
+            auto countLong = std::stoul(line.substr(lastSpace + 1));
+            unsigned int count = static_cast<unsigned int>(countLong);
+            combinedCounts[url] += count;
          }
-
-         std::vector<std::pair<std::string, unsigned>> tempResult;
-         std::merge(urlCounts.begin(), urlCounts.end(),
-                    partitionUrls.begin(), partitionUrls.end(),
-                    std::back_inserter(tempResult),      
-                    [](const auto& a, const auto& b) { return a.second > b.second; });
-
-         if (tempResult.size() > 25) {
-            tempResult.resize(25);
-         }
-
-         urlCounts = std::move(tempResult);
       }
-   }
-
-   std::ofstream os("result.csv");
-
-   for (auto& e : urlCounts)
-      os << e.first << " " << e.second << std::endl;
-   os.close();
-
-   // Cleanup
-   for (auto& pollFd : pollFds)
-      close(pollFd.fd);
-
-   return 0;
+        std::cerr << "Processed " << blobName << std::endl;
+    }
 }
 
-/*
-   static const std::string accountName = "cbdp1";
-   static const std::string accountToken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6IlQxU3QtZExUdnlXUmd4Ql82NzZ1OGtyWFMtSSIsImtpZCI6IlQxU3QtZExUdnlXUmd4Ql82NzZ1OGtyWFMtSSJ9.eyJhdWQiOiJodHRwczovL3N0b3JhZ2UuYXp1cmUuY29tLyIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzdlODJmZDZkLTNlZGUtNDg3Mi1hZGMzLTgxNTExMTg1YjFhYy8iLCJpYXQiOjE3MDEyODQ4NDQsIm5iZiI6MTcwMTI4NDg0NCwiZXhwIjoxNzAxMjg5MDk5LCJhY3IiOiIxIiwiYWlvIjoiQVlRQWUvOFZBQUFBWENEUHFhQmxrUTBUUStIRUhyU2xveHNkMTdyZTR4MjR3ejhtSEpyS2pBNGlJL2hpOGlNZTUvTzQ2R0tlSGlMQytpem5kN2hyUWVBV2hNV2NqVWpOYmRQL2dGRHFTb05XRlVNSjUyaUJiRDNpVHdCT2xhSHJCQ2RSUDFZREFwdk92NDVOZERBSU5hTWFad1JvMUMwNDRzU1RVb0tZYktJbXE4SVo1S1BqSHI0PSIsImFsdHNlY2lkIjoiMTpsaXZlLmNvbTowMDAzMDAwMDY5NTAyNThGIiwiYW1yIjpbInB3ZCIsIm1mYSJdLCJhcHBpZCI6IjA0YjA3Nzk1LThkZGItNDYxYS1iYmVlLTAyZjllMWJmN2I0NiIsImFwcGlkYWNyIjoiMCIsImVtYWlsIjoiZ29ldHp0QGluLnR1bS5kZSIsImZhbWlseV9uYW1lIjoiR29ldHoiLCJnaXZlbl9uYW1lIjoiVG9iaWFzIiwiZ3JvdXBzIjpbIjkyZTA5YmMwLWNjYjAtNDI5NS1hNWQwLWY3YWM5NTQ0MjAxYiJdLCJpZHAiOiJsaXZlLmNvbSIsImlwYWRkciI6IjJhMDE6YzIzOmJkOTc6M2YwMDpkOGVjOjVkM2E6MThhOjNlZWIiLCJuYW1lIjoiVG9iaWFzIEdvZXR6Iiwib2lkIjoiMTJiZGY5MGEtYTYzZi00YWQzLWE5ZmItZWI1N2RlODI3YTU2IiwicHVpZCI6IjEwMDMyMDAzMTU3QTdCQTQiLCJyaCI6IjAuQWE4QWJmMkNmdDQtY2tpdHc0RlJFWVd4cklHbUJ1VFU4NmhDa0xiQ3NDbEpldkdzQUU4LiIsInNjcCI6InVzZXJfaW1wZXJzb25hdGlvbiIsInN1YiI6ImVfT0dxVUt1ZUdwekpfOHg2WTNueG5QS2pDcG1qRk1DeWhIcDRwMTNhTXMiLCJ0aWQiOiI3ZTgyZmQ2ZC0zZWRlLTQ4NzItYWRjMy04MTUxMTE4NWIxYWMiLCJ1bmlxdWVfbmFtZSI6ImxpdmUuY29tI2dvZXR6dEBpbi50dW0uZGUiLCJ1dGkiOiJGNm1DRkZNMlQwYUxqMkdJTExjckFRIiwidmVyIjoiMS4wIiwieG1zX3RkYnIiOiJFVSJ9.JrdlunDBTsyzm7qIO7eNG50G2FajoEAZpU0ckm11tcgkeLB87GXh0GCdmHxvlz2KuChywz7QfvyzL7xkJI5Lg2gXsclrYx-3Y0VmdJSf2gq5HfPMiZ8yJTrv3wkYWqPbGH22Af0stkqC_-P5EidR_NDNAI8hETWoosyK80KHbsS9dn8xScTb2GZMaVC_fFvahgdmcOzyLuDayd9OalnN6yacP1HEAfxs6gpgUXz8OYJ6N7VSeoRAaPodHAiSTiJG1qouxNC5YyqSmXwNj5w8m6JHYVn2kwmqc2kAzVDdbEB03JYMFajq4MYwbLTY2O_qkyir3_MbUq6NB17_tRDZZA";
-   auto blobClient = AzureBlobClient(accountName, accountToken);
+// Convert to vector for sorting
+std::vector<std::pair<std::string, unsigned>> finalResults;
+finalResults.reserve(combinedCounts.size());
+for (const auto& [url, count] : combinedCounts) {
+    finalResults.emplace_back(url, count);
+}
 
-   std::cerr << "Creating Azure blob container" << std::endl;
-   blobClient.createContainer("cbdp-assignment-5");
+// Sort by count and keep top 25
+std::partial_sort(
+    finalResults.begin(),
+    finalResults.begin() + static_cast<long>(std::min(finalResults.size(), 25ul)),
+    finalResults.end(),
+    [](const auto& a, const auto& b) { return a.second > b.second; }
+);
 
-   std::cerr << "Uploading a blob" << std::endl;
-   {
-      std::stringstream upload;
-      upload << "Hello World!" << std::endl;
-      blobClient.uploadStringStream("hello", upload);
-   }
+if (finalResults.size() > 25) {
+    finalResults.resize(25);
+}
 
-   std::cerr << "Downloading the blob again" << std::endl;
-   auto downloaded = blobClient.downloadStringStream("hello");
+std::cerr << "\n=== Final Results ===" << std::endl;
+std::cerr << "Total unique URLs found: " << combinedCounts.size() << std::endl;
+std::cerr << "Showing top " << finalResults.size() << " results:" << std::endl;
 
-   std::cerr << "Received: " << downloaded.view() << std::endl;
+for (const auto& [url, count] : finalResults) {
+    std::cout << url << " " << count << std::endl;
+}
 
-   std::cerr << "Deleting the container" << std::endl;
-   blobClient.deleteContainer();
-*/
+std::cerr << "=== Processing Complete ===" << std::endl;
 
-// helper function for extracting domains
-// static std::string_view getDomain(std::string_view url)
-// {
-//    using namespace std::literals;
-//    auto pos = url.find("://"sv);
-//    if (pos != std::string::npos) {
-//       auto afterProtocol = std::string_view(url).substr(pos + 3);
-//       auto endDomain = afterProtocol.find('/');
-//       return afterProtocol.substr(0, endDomain);
-//    }
-//    return url;
-// }
+// Cleanup
+for (auto& pollFd : pollFds) {
+    close(pollFd.fd);
+}
+
+return 0;
+}

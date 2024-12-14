@@ -16,9 +16,8 @@ azure::storage_lite::blob_client AzureBlobClient::createClient(const std::string
    return {std::move(account), 16};
 }
 
-AzureBlobClient::AzureBlobClient(const std::string& accountName, const std::string& accessToken)
-   : client(createClient(accountName, accessToken))
-// Constructor
+AzureBlobClient::AzureBlobClient(const std::string& accountName, const std::string& accessToken, const std::string& container_name)
+   : client(createClient(accountName, accessToken)),  containerName(container_name)
 {
 }
 
@@ -40,32 +39,32 @@ void AzureBlobClient::deleteContainer()
    this->containerName = {};
 }
 
-void AzureBlobClient::uploadStringStream(const std::string& blobName, std::stringstream& stream)
+void AzureBlobClient::uploadStringStream(const std::string& blobName, std::stringstream& stream,const std::string& container_name_intermediate)
 // Write a string stream to a blob
 {
-   auto uploadRequest = client.upload_block_blob_from_stream(containerName, blobName, stream, {}).get();
+   auto uploadRequest = client.upload_block_blob_from_stream(container_name_intermediate, blobName, stream, {}).get();
    if (!uploadRequest.success())
       throw std::runtime_error("Azure upload blob failed: " + formatError(uploadRequest.error()));
 }
 
-std::stringstream AzureBlobClient::downloadStringStream(const std::string& blobName)
+std::stringstream AzureBlobClient::downloadStringStream(const std::string& blobName,const std::string& container_name_intermediate)
 // Read a string stream from a blob
 {
    std::stringstream result;
-   auto downloadRequest = client.download_blob_to_stream(containerName, blobName, 0, 0, result).get();
+   auto downloadRequest = client.download_blob_to_stream(container_name_intermediate, blobName, 0, 0, result).get();
    if (!downloadRequest.success())
       throw std::runtime_error("Azure download blob failed: " + formatError(downloadRequest.error()));
    return result;
 }
 
-std::vector<std::string> AzureBlobClient::listBlobs()
+std::vector<std::string> AzureBlobClient::listBlobs(const std::string& container_name_intermediate)
 // List all blobs in the container
 {
    std::vector<std::string> results;
    std::string continuationToken;
 
    do {
-      auto blobs = client.list_blobs_segmented(containerName, "/", continuationToken, "").get();
+      auto blobs = client.list_blobs_segmented(container_name_intermediate, "/", continuationToken, "").get();
       if (!blobs.success())
          throw std::runtime_error("Azure list blobs: " + formatError(blobs.error()));
       for (auto& blob : blobs.response().blobs)

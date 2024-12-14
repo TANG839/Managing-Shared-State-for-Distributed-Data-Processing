@@ -22,24 +22,27 @@ class AzureBlobClient {
    ///               az storage account list
    /// @accessToken: An access token for azure. Get an access token via:
    ///               az account get-access-token --resource https://storage.azure.com/ -o tsv --query accessToken
-   AzureBlobClient(const std::string& accountName, const std::string& accessToken);
+   AzureBlobClient(const std::string& accountName, const std::string& accessToken, const std::string& container_name );
    AzureBlobClient(const AzureBlobClient&) = delete;
    AzureBlobClient& operator=(const AzureBlobClient&) = delete;
 
    /// Create a container that stores all blobs
    void createContainer(std::string containerName);
+
+   /// Set the container name for operations
+   void setContainer(std::string containerName);
    
    /// Delete the container that stored all blobs
    void deleteContainer();
 
    /// Write a string stream to a blob
-   void uploadStringStream(const std::string& blobName, std::stringstream& stream);
+   void uploadStringStream(const std::string& blobName, std::stringstream& stream,const std::string& container_name_intermediate);
 
    /// Read a string stream from a blob
-   std::stringstream downloadStringStream(const std::string& blobName);
+   std::stringstream downloadStringStream(const std::string& blobName, const std::string& container_name_intermediate);
 
    /// List all blobs in the container
-   std::vector<std::string> listBlobs();
+   std::vector<std::string> listBlobs(const std::string& container_name_intermediate);
 };
 
 #endif

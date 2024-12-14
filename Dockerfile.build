@@ -1,0 +1,48 @@
+# # Build container - Dockerfile.build
+# FROM ubuntu:22.04 as builder
+
+# RUN apt-get update && apt-get install -y \
+#     cmake \
+#     g++ \
+#     libasan6 \
+#     libssl-dev \
+#     libcurl4-openssl-dev \
+#     uuid-dev \
+#     make \
+#     git \
+#     pkg-config  
+
+# WORKDIR /build
+# COPY . .
+
+# RUN cmake -B build -DCMAKE_BUILD_TYPE=Debug && \
+#     cmake --build build
+FROM ubuntu:22.04 as builder
+
+RUN apt-get update && apt-get install -y \
+    cmake \
+    g++ \
+    libasan6 \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    uuid-dev \
+    make \
+    git \
+    pkg-config  
+
+WORKDIR /build
+
+# Copy cmake files first
+COPY CMakeLists.txt .
+COPY cmake ./cmake
+
+# Copy source files
+COPY coordinator.cpp .
+COPY worker.cpp .
+COPY AzureBlobClient.cpp .
+COPY AzureBlobClient.h .
+COPY CurlEasyPtr.cpp .
+COPY CurlEasyPtr.h .
+
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Debug && \
+    cmake --build build
