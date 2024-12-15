@@ -9,12 +9,12 @@ if ! [[ "$workers" =~ ^[0-9]+$ ]]; then
 fi
 
 # Start coordinator
-docker run -d --network=cbdp_net --name=coordinator cbdp_coordinator_new
+docker run -d --network=cbdp_net --name=coordinator cbdp_coordinator
 
 # Start workers in parallel
 for i in $(seq 1 $workers)
 do
-    docker run -d --network=cbdp_net --name="worker$i" cbdp_worker_new &
+    docker run -d --network=cbdp_net --name="worker$i" cbdp_worker &
 done
 
 # Wait for all background processes to complete
