@@ -76,14 +76,10 @@ UrlCountResult processUrl(std::string_view url, unsigned partitionCount, AzureBl
 }
 
 
-// Modify sendToBlobStore to include logging:
 void sendToBlobStore(std::string_view msg, std::string filename, AzureBlobClient& blobClient, const std::string& container_name) {
-   //  std::cerr << "Uploading to blob: " << filename << std::endl
-   //            << "  Data size: " << msg.size() << " bytes" << std::endl;
     std::stringstream ss;
     ss << msg;
     blobClient.uploadStringStream(filename, ss, container_name);
-   //  std::cerr << "Upload complete for: " << filename << std::endl;
 }
 std::vector<std::pair<std::string, unsigned>> mergeBlobsWithId(unsigned id, AzureBlobClient& blobClient, const std::string& container_name) {
     std::unordered_map<std::string, unsigned> urlCounts;
@@ -119,25 +115,19 @@ enum Command {
    MERGE
 };
 
-/// Worker process that receives a list of URLs and reports the result
-/// Example:
-///    ./worker localhost 4242
-/// The worker then contacts the leader process on "localhost" port "4242" for work
 int main(int argc, char* argv[]) {
    if (argc != 3) {
       std::cerr << "Usage: " << argv[0] << " <host> <port>" << std::endl;
       return 1;
    }
 
-   // for (const auto& entry : std::filesystem::directory_iterator("./mock_blob_store")) {
-   //    std::filesystem::remove(entry);
-   // }
-
    static const std::string accountName = "csb10032003e7e1ee2c";
-   static const std::string accountToken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Inp4ZWcyV09OcFRrd041R21lWWN1VGR0QzZKMCIsImtpZCI6Inp4ZWcyV09OcFRrd041R21lWWN1VGR0QzZKMCJ9.eyJhdWQiOiJodHRwczovL3N0b3JhZ2UuYXp1cmUuY29tLyIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzFjNmJhMjc0LTNjMzktNGE2MC1hMzZiLTM2N2IxNDc3MGM5My8iLCJpYXQiOjE3MzQxODUwOTEsIm5iZiI6MTczNDE4NTA5MSwiZXhwIjoxNzM0MTkwMTMzLCJhY3IiOiIxIiwiYWlvIjoiQVlRQWUvOFlBQUFBMjc3NDI3bmIydTdrMzhYOGFxNjNXNENhR0RoR2oyRnp4K1VvNUVGN1JJNWhudWIrQTRuUWMyTFBVWGJ3VW5xMmlsdjdRdUwvMmhVZU1UNmJrY2h4RU9tRlRJS3R2NEYwMFJ2UmU4SEpzUjdRVENhclVoK01EbEJEbXFwUzl1REp6Y0pDR21oc1FQRzhGcFo1NUlTSUhGS1ozRlpCaHlCZXJyOGZIaWlFUHRFPSIsImFsdHNlY2lkIjoiMTpsaXZlLmNvbTowMDAzNDAwMjgwNzE1OEI2IiwiYW1yIjpbInB3ZCIsIm1mYSJdLCJhcHBpZCI6IjA0YjA3Nzk1LThkZGItNDYxYS1iYmVlLTAyZjllMWJmN2I0NiIsImFwcGlkYWNyIjoiMCIsImVtYWlsIjoibW9hYWQubWFhcm91ZmlAaWNsb3VkLmNvbSIsImZhbWlseV9uYW1lIjoiTWFyb3VmaSIsImdpdmVuX25hbWUiOiJNb2FkIiwiZ3JvdXBzIjpbIjY0MGYzNGQ3LThlNzctNDg2My04OWE2LTI1ZjY4YjEyNTMxOCJdLCJpZHAiOiJsaXZlLmNvbSIsImlkdHlwIjoidXNlciIsImlwYWRkciI6IjE0MS44NC42OS44OSIsIm5hbWUiOiJNb2FkIE1hcm91ZmkiLCJvaWQiOiI2YjA4YmFhNC1iZWM3LTQ4YTgtOThkNC0yMmEyMjZjZGFhM2UiLCJwdWlkIjoiMTAwMzIwMDNFN0UxRUUyQyIsInJoIjoiMS5BUk1CZEtKckhEazhZRXFqYXpaN0ZIY01rNEdtQnVUVTg2aENrTGJDc0NsSmV2RVVBVElUQVEuIiwic2NwIjoidXNlcl9pbXBlcnNvbmF0aW9uIiwic3ViIjoiSnN5cFVqN1JMMXZyZnJ3bGEtc2JVQTRsRjlvRUl5MFBnRVBuYVFGalp3SSIsInRpZCI6IjFjNmJhMjc0LTNjMzktNGE2MC1hMzZiLTM2N2IxNDc3MGM5MyIsInVuaXF1ZV9uYW1lIjoibGl2ZS5jb20jbW9hYWQubWFhcm91ZmlAaWNsb3VkLmNvbSIsInV0aSI6IlFlLXdRUWNaUmttV2pYdGk5Z2lsQUEiLCJ2ZXIiOiIxLjAiLCJ4bXNfaWRyZWwiOiIxIDI2IiwieG1zX3RkYnIiOiJFVSJ9.hBTF5u8gqvhji6FcEF9FC4F7aOyW717Ttbtno7hxN3qONLUMF5mNDpm9G-2hjX8gN4CjBwHfP8AxLQjXSRPiYaHBGXU1xqpL4j4SAfNpZ57zB8jZkj4JiWM7G6pmyOAZ5N-kseI305duYtYTRIbMULFy7IyGVYShNkHzaNLDGDXboF4OnIhRPWgMEhlK4JPv7RXZl2u4bNT_OA5e2HBlzOG1lnRDRQv-Tgoj0IaNeOorE1bcorGbNWRY5Gwm7jLu_Cg-eTOlh02uF4Km4G8zTG0EiKaBSLo5BLifAPX43v0g5iiKib1wD6yqlUDDmEuUFIfE3kHnIzAOD5yEkietTQ";
+   //the token expires in an hour, it needs to be regnerated
+   static const std::string accountToken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Inp4ZWcyV09OcFRrd041R21lWWN1VGR0QzZKMCIsImtpZCI6Inp4ZWcyV09OcFRrd041R21lWWN1VGR0QzZKMCJ9.eyJhdWQiOiJodHRwczovL3N0b3JhZ2UuYXp1cmUuY29tLyIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzFjNmJhMjc0LTNjMzktNGE2MC1hMzZiLTM2N2IxNDc3MGM5My8iLCJpYXQiOjE3MzQyNzUxNzMsIm5iZiI6MTczNDI3NTE3MywiZXhwIjoxNzM0Mjc5MjI2LCJhY3IiOiIxIiwiYWlvIjoiQVlRQWUvOFlBQUFBRzkxRjNWNjJMRDZ2Vk84UHdvVE4vdEF2ZUtSZmpzT0NVbEVMVmNqUGFPV1BIay9iZ1phSGR5QlY5QkpKbnRwWmw3UEhRZ2hKbHJvOE9XVjhXWE1jbEdtYm5TTUMyREgva2tnbFNrZVZPQXBzdm0rZmp1czZuU1ZtcE0wOTEzMkt0eVVhekxpa01kSWNGeHo0alM5OEVFQVV6R2tLdVpSRVhZUXNwNUNaOUo4PSIsImFsdHNlY2lkIjoiMTpsaXZlLmNvbTowMDAzNDAwMjgwNzE1OEI2IiwiYW1yIjpbInB3ZCIsIm1mYSJdLCJhcHBpZCI6IjA0YjA3Nzk1LThkZGItNDYxYS1iYmVlLTAyZjllMWJmN2I0NiIsImFwcGlkYWNyIjoiMCIsImVtYWlsIjoibW9hYWQubWFhcm91ZmlAaWNsb3VkLmNvbSIsImZhbWlseV9uYW1lIjoiTWFyb3VmaSIsImdpdmVuX25hbWUiOiJNb2FkIiwiZ3JvdXBzIjpbIjY0MGYzNGQ3LThlNzctNDg2My04OWE2LTI1ZjY4YjEyNTMxOCJdLCJpZHAiOiJsaXZlLmNvbSIsImlkdHlwIjoidXNlciIsImlwYWRkciI6IjE0MS44NC42OS44OSIsIm5hbWUiOiJNb2FkIE1hcm91ZmkiLCJvaWQiOiI2YjA4YmFhNC1iZWM3LTQ4YTgtOThkNC0yMmEyMjZjZGFhM2UiLCJwdWlkIjoiMTAwMzIwMDNFN0UxRUUyQyIsInJoIjoiMS5BUk1CZEtKckhEazhZRXFqYXpaN0ZIY01rNEdtQnVUVTg2aENrTGJDc0NsSmV2RVVBVElUQVEuIiwic2NwIjoidXNlcl9pbXBlcnNvbmF0aW9uIiwic3ViIjoiSnN5cFVqN1JMMXZyZnJ3bGEtc2JVQTRsRjlvRUl5MFBnRVBuYVFGalp3SSIsInRpZCI6IjFjNmJhMjc0LTNjMzktNGE2MC1hMzZiLTM2N2IxNDc3MGM5MyIsInVuaXF1ZV9uYW1lIjoibGl2ZS5jb20jbW9hYWQubWFhcm91ZmlAaWNsb3VkLmNvbSIsInV0aSI6Ik8zNFhnZW5zTEUtWEQwZC0yNFhWQUEiLCJ2ZXIiOiIxLjAiLCJ4bXNfaWRyZWwiOiIyIDEiLCJ4bXNfdGRiciI6IkVVIn0.cYpLx6OoYIi_1nXkR8ZLX-ZQc4S7xNkf9XJgD-jdzMFjkK56kkOsL9VlGTip8-ALdbkwLZ48F-Fbm5rQDH6Buen6TlgdfEU8tLE4wpjWg3Hd2_1VPGFzCwYnbqT4GdT7MYSo-3IwYO9Cph-XvK0gPGIj6PyDmEMs-jDT0URHYQxFYjsGOEV2lOQJDZwFY4YGgE5eKNgJtABGocJP5zW71ndjAlub2yie-QoHQvE9yuVHMeLACEjKGzCG48O8ymImE2ZxIDrJRXd2z_1kMXVszhQAZl_etHxkDRZcaoxmvhP7GW7CQa0xccPPBpq6hWmW1suA0peDT_K2Awmq5wLibA";
    static const std::string container_name ="cbdp-files";
+   //after each rerun manually remove the old cbdp-files-intermediate and create a new one
+   // you would have to wait a little a bit to create one with the same name
    static const std::string container_name_intermediate ="cbdp-files-intermediate";
-   std::cerr << "Trying to authenticate" << std::endl;
    auto blobClient = AzureBlobClient(accountName, accountToken,container_name);
 
    // Set up the connection
@@ -214,38 +204,27 @@ breakConnect:
 
 case DOWNLOAD: { // request: <url>
     if (partitionCount == 0) {
-      //   std::cerr << "Invalid partition count" << std::endl;
         exit(EXIT_FAILURE);
     }
     
     // Debug buffer content
-   //  std::cerr << "Buffer content (first 50 chars): '";
     for (size_t i = 0; i < std::min<size_t>(50, static_cast<size_t>(numBytes)); i++) {
         if (buffer[i] == '\n') std::cerr << "\\n";
         else if (buffer[i] == '\r') std::cerr << "\\r";
         else std::cerr << buffer[i];
     }
-   //  std::cerr << "'" << std::endl;
-   //  std::cerr << "Total buffer size: " << numBytes << " bytes" << std::endl;
     
     auto sep = std::find(buffer.begin() + 1, buffer.end(), ' ');
     unsigned downloadId = static_cast<unsigned>(std::atoi(buffer.data() + 1));
-   //  std::cerr << "Download ID: " << downloadId << std::endl;
-   //  std::cerr << "Separator position: " << (sep - buffer.begin()) << std::endl;
 
     // Create string_view and check its content
     std::string_view url = std::string_view(sep + 1, static_cast<size_t>(numBytes - (sep - buffer.begin()) - 1));
-   //  std::cerr << "Extracted URL (length " << url.length() << "): '" << url << "'" << std::endl;
     
-    // Rest of the code remains the same...
     UrlCountResult result = processUrl(url, partitionCount, blobClient, container_name);
     
     if (result.size() != partitionCount) {
-      //   std::cerr << "Invalid partition of urls\n";
         exit(EXIT_FAILURE);
     }
-    
-   //  std::cerr << "\nPreparing to upload partitions for download ID: " << downloadId << std::endl;
     for (unsigned i = 0; i < partitionCount; i++) {
         std::stringstream response_stream;
         for (const auto& e : result[i]) {
@@ -254,7 +233,6 @@ case DOWNLOAD: { // request: <url>
 
         std::string result_string = response_stream.str();
         if (!result_string.empty()) {
-            // std::cerr << "Partition " << i << " size: " << result_string.length() << " bytes" << std::endl;
             sendToBlobStore(result_string, 
                           "subpartition_" + std::to_string(downloadId) + "_" + std::to_string(i + 1),
                           blobClient, 
@@ -265,7 +243,7 @@ case DOWNLOAD: { // request: <url>
 }
 
          case MERGE: { // request: <partition id>
-            std::cerr << "\n=== woker is Merging===" << std::endl;
+            // std::cerr << "\n=== woker is Merging===" << std::endl;
             buffer[12] = 0; // terminate string
             unsigned partitionId = static_cast<unsigned>(std::atoi(buffer.data() + 1));
             if (partitionId == 0) {
@@ -281,7 +259,7 @@ case DOWNLOAD: { // request: <url>
 
             std::string result_string = response_stream.str();
             if (!result_string.empty()){
-               std::cerr << "\n=== sending to blob store the sorted_partition ===" << std::to_string(partitionId) << std::endl;
+               // std::cerr << "\n=== sending to blob store the sorted_partition ===" << std::to_string(partitionId) << std::endl;
                sendToBlobStore(result_string, "sorted_partition_" + std::to_string(partitionId),blobClient, container_name_intermediate);
             }
             break;
