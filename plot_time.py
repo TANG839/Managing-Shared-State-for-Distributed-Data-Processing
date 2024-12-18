@@ -37,17 +37,14 @@ for line in data.strip().split('\n'):
     workers.append(num_workers)
     elapsed_times.append(elapsed_time)
 
-# Create the plot
 plt.figure(figsize=(10, 6))
 plt.plot(workers, elapsed_times, 'bo-', linewidth=2, markersize=8)
 
-# Customize the plot
 plt.title('Task Completion Time vs Number of Partitions for 5 workers', fontsize=14, pad=20)
 plt.xlabel('Number of Partitions', fontsize=12)
 plt.ylabel('Elapsed Time (seconds)', fontsize=12)
 plt.grid(True, linestyle='--', alpha=0.7)
 
-# Add value labels on each point
 for i, (x, y) in enumerate(zip(workers, elapsed_times)):
     plt.annotate(f'{y:.1f}s', 
                 (x, y), 

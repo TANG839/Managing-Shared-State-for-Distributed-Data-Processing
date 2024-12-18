@@ -26,9 +26,10 @@ The token in the code that enables us to interact with Blob storage `expires eve
 az account get-access-token --resource https://storage.azure.com/ -o tsv --query accessToken
 ```
 Our unit test `runtest.sh` will start the coordinator and the workers, providing results along with time statistics. You can modify the number of workers in the script. It takes approximately 3 minutes to execute on a MacBook Pro with the following specifications:
-- Intel i3 processor
+- 1,4 GHz Quad-Core Intel Core i5
 - 8GB RAM
 - 8 cores
+- MacOS: 14.6.1 (23G93)
 ```bash
 mkdir build & cd build
 cmake ..
