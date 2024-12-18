@@ -1,94 +1,66 @@
-# Managing Shared State for Distributed Query Execution
-The first task of this assignment is to deploy your assignment 4 solution (or the base one we provide) in Azure, and answer the relevant questions from the [assignment sheet](assignment_sheet_5.pdf).
+# Managing Shared State for Distributed Query Execution Documentation
+We will present 2 ways our solution can be deployed: either locally or on Azure Cloud. For both solutions, Blob storage is needed.
+We use 2 containers for Blob storage: one for reading the files and the 100 partitions, and one for intermediate writing of sub-partitions/merging etc.
 
-The second and main programming task of the assignment is to implement distributed query execution with shared state. 
+Both containers need to be created manually on the cloud and the required names and credentials must be filled in the code before compiling.
+The intermediate container needs to be empty. When you rerun the experiment, you need to delete it and create another one with the same name manually.
 
-We start again with the same partitioned data on external storage and similar elasticity goals.
-However, we now process a query that needs to share state between workers.
-
-We want to calculate how often each domain appeared (not only a specific domain as in the last assignment), and report the result for the top 25 domains.
-
-For each input partition, we build multiple (partial) aggregates, one for each domain, which we then need to merge. Merging on the coordinator, as we did in the last assignment, does not scale well for this query. To scale the merge phase, we partition the aggregates and store them in shared state. After the initial aggregation and partitioning, we distribute the work of merging the partial aggregate partitions, and send the merged results to the coordinator.
-
-As an example, consider the initial `filelist.csv` with three partitions:
-
+We first upload the files from https://db.in.tum.de/teaching/ws2425/clouddataprocessing/data to the Azure Blob storage container. We also upload a version of filelist that only contains the file names as they are in Azure to the same container:
+```bash
+clickbench.00.csv
+clickbench.01.csv
+clickbench.02.csv
+...
 ```
-test.csv.1
-test.csv.2
-test.csv.3
-```
-
-Each worker takes a partition, partitions and aggregates it, and stores the aggregate in shared state files.
-E.g., we partition the aggregates each into three partitions:
-
-```
-aggregated.1.test.csv.1
-aggregated.2.test.csv.1
-aggregated.3.test.csv.1
-aggregated.1.test.csv.2
-aggregated.2.test.csv.2
-aggregated.3.test.csv.2
-aggregated.1.test.csv.3
-aggregated.2.test.csv.3
-aggregated.3.test.csv.3
+The Python script `send_data_to_azure.py` automates the uploading process.
+Note that we use an Azure Storage connection string to upload the data to Azure Blob storage in the script which you need to modify. The connection string follows this format:
+```bash
+DefaultEndpointsProtocol=https;AccountName=<your-account-name>;AccountKey=<your-account-key>;EndpointSuffix=core.windows.net
 ```
 
-Now each of the workers takes one aggregate partition, e.g.:
 
-```
-aggregated.1.test.csv.1
-aggregated.1.test.csv.2
-aggregated.1.test.csv.3
-```
 
-For this aggregate partition, we can now calculate a total result and get the top 25 `top25.1.csv`, which we again store
-in shared state. Afterwards, the coordinator can collect the small results, calculate, and print the overall top 25.
-
-You can see a detailed diagram of the query execution stages [here](screenshots/diagram.png)
-
-## Shared State
-
-To test data stored in shared state locally, you can use files on your file system
-([`std::fstream`](https://en.cppreference.com/w/cpp/io/basic_fstream)).
-To share state in Azure, you can use the [Azure Storage Library](https://github.com/Azure/azure-storage-cpplite).
-Our scaffold includes a small example how to use the Azure blob storage (similar to S3).
-
-For Azure storage, you also need
-to [create a storage account](https://learn.microsoft.com/en-us/azure/storage/common/storage-account-create?tabs=azure-cli):
-
-```
-az storage account create --name "cbdp$RANDOM" --resource-group cbdp-resourcegroup --location westeurope
-```
-
-You will also need to add the `Storage Blob Data Contributor` role assignment to that storage account through the Azure
-web interface.
-
-## Execution
-
-Install dependencies. Slightly more due than last time due to the Azure library.
-
-```
-sudo apt install cmake g++ libcurl4-openssl-dev libssl-dev uuid-dev
-```
-
-In order to run the example we give you in the coordinator, add your storage account name and token in lines 33-34. 
-
-To create an access token, use: 
-```
+### Local execution:
+The token in the code that enables us to interact with Blob storage `expires every hour`, so it needs to be replaced with your current token before deploying containers to Azure in both the coordinator and the worker. As mentioned in the Azure tutorial, you can obtain a new token using this command:
+```bash
 az account get-access-token --resource https://storage.azure.com/ -o tsv --query accessToken
 ```
- 
-## Submission:
-You can submit everything via GitLab.
-First fork this repository, and add all members of your group to a single repository.
-Then, in this group repository, add:
-* Names of all members of your group in groupMembers.txt
-* Code that implements the assignment
-* Test scripts that demonstrate the capabilities of your solution (correctness, elasticity, resilience)
-* A written report giving a brief description of your implementation, and answering the questions that you can find on the assignment sheet.
+Our unit test `runtest.sh` will start the coordinator and the workers, providing results along with time statistics. You can modify the number of workers in the script. It takes approximately 3 minutes to execute on a MacBook Pro with the following specifications:
+- Intel i3 processor
+- 8GB RAM
+- 8 cores
+```bash
+mkdir build & cd build
+cmake ..
+make
+cd ..
+chmod +x runTest.sh
+./runTest.sh
+```
+
+### Docker conatiner deployement
+Now we need to cross-compile the code for the Docker container. We encountered a problem: if the OS version or Linux distribution dependencies don't match those in the container, the code won't work. Additionally, compiling at runtime in Azure would increase runtime and make debugging more difficult.
+
+Therefore, our solution is to cross-compile in another Docker container beforehand and then use these executables to create the coordinator and worker containers on Azure.
+
+Cross compile:
+```bash
+mdkir cmake-build-debug
+./cross_compile_push_to_azure.sh 
+```
+and then deploy either locally:
+
+```bash
+./deploy [number of workers]
+```
+or on azure:
+```bash
+./deploy_conatainers_azure.sh [number of workers]
+```
 
 
-## Deploy to Azure:
 
-In this assignment, please run your experiments on Microsoft Azure.
-We have a [tutorial](AZURE_TUTORIAL.md) with detailed instructions on how to deploy and run your solution in Azure.
+
+
+
+
